@@ -1,26 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.schemas import (
-    LoginRequest,
-    LoginResponse,
-    RegisterRequest,
-    RegisterResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    LoginRequest,
+    LoginResponse,
+    MeResponse,
+    RefreshResponse,
+    RegisterRequest,
+    RegisterResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
-    MeResponse,
-    LogoutRequest,
-    LogoutResponse,
-    RefreshRequest,
-    RefreshResponse,
-    ErrorResponse,
 )
 from app.auth.service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -28,12 +23,7 @@ def get_auth_service() -> AuthService:
     return AuthService()
 
 
-@router.post(
-    "/register",
-    response_model=RegisterResponse,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="register",
-)
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
@@ -41,12 +31,7 @@ async def register(
     return await service.register(body)
 
 
-@router.post(
-    "/login",
-    response_model=LoginResponse,
-    status_code=status.HTTP_200_OK,
-    operation_id="login",
-)
+@router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
 async def login(
     body: LoginRequest,
     response: Response,
@@ -55,12 +40,7 @@ async def login(
     return await service.login(body, response)
 
 
-@router.post(
-    "/forgot-password",
-    response_model=ForgotPasswordResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    operation_id="forgotPassword",
-)
+@router.post("/forgot-password", response_model=ForgotPasswordResponse, status_code=status.HTTP_202_ACCEPTED)
 async def forgotPassword(
     body: ForgotPasswordRequest,
     service: AuthService = Depends(get_auth_service),
@@ -68,12 +48,7 @@ async def forgotPassword(
     return await service.forgotPassword(body)
 
 
-@router.post(
-    "/reset-password",
-    response_model=ResetPasswordResponse,
-    status_code=status.HTTP_200_OK,
-    operation_id="resetPassword",
-)
+@router.post("/reset-password", response_model=ResetPasswordResponse, status_code=status.HTTP_200_OK)
 async def resetPassword(
     body: ResetPasswordRequest,
     service: AuthService = Depends(get_auth_service),
@@ -81,12 +56,7 @@ async def resetPassword(
     return await service.resetPassword(body)
 
 
-@router.get(
-    "/me",
-    response_model=MeResponse,
-    status_code=status.HTTP_200_OK,
-    operation_id="me",
-)
+@router.get("/me", response_model=MeResponse, status_code=status.HTTP_200_OK)
 async def me(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     service: AuthService = Depends(get_auth_service),
@@ -94,36 +64,26 @@ async def me(
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail={"error": {"code": "UNAUTHORIZED", "message": "Authentication required.", "details": []}},
         )
     return await service.me(credentials.credentials)
 
 
-@router.post(
-    "/logout",
-    response_model=LogoutResponse,
-    status_code=status.HTTP_200_OK,
-    operation_id="logout",
-)
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
-    body: LogoutRequest,
+    request: Request,
     response: Response,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     service: AuthService = Depends(get_auth_service),
-) -> LogoutResponse:
-    access_token: str | None = credentials.credentials if credentials else None
-    return await service.logout(body, access_token, response)
+) -> None:
+    token = credentials.credentials if credentials else None
+    await service.logout(token, request, response)
 
 
-@router.post(
-    "/refresh",
-    response_model=RefreshResponse,
-    status_code=status.HTTP_200_OK,
-    operation_id="refresh",
-)
+@router.post("/refresh", response_model=RefreshResponse, status_code=status.HTTP_200_OK)
 async def refresh(
-    body: RefreshRequest,
+    request: Request,
     response: Response,
     service: AuthService = Depends(get_auth_service),
 ) -> RefreshResponse:
-    return await service.refresh(body, response)
+    return await service.refresh(request, response)
