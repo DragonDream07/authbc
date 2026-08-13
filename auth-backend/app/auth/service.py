@@ -1,15 +1,13 @@
 import hashlib
 import os
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
-from fastapi.responses import Response
-from fastapi.security import HTTPAuthorizationCredentials
-from jose import JWTError, jwt
-
+import jwt
+from fastapi import HTTPException, Request, Response, status
 from app.auth.schemas import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -18,33 +16,28 @@ from app.auth.schemas import (
     LogoutRequest,
     LogoutResponse,
     MeResponse,
+    RefreshRequest,
     RefreshResponse,
     RegisterRequest,
     RegisterResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
 )
-from app.database import get_db
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
-from app.models import PasswordReset, RefreshToken, User
+from app.db import get_db_connection
 
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "changeme")
-ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "changeme")
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
-REFRESH_TOKEN_EXPIRE_DAYS_REMEMBER = int(
-    os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS_REMEMBER", "30")
-)
+REFRESH_TOKEN_REMEMBER_DAYS = int(os.environ.get("REFRESH_TOKEN_REMEMBER_DAYS", "30"))
+RESET_TOKEN_EXPIRE_MINUTES = int(os.environ.get("RESET_TOKEN_EXPIRE_MINUTES", "30"))
 BCRYPT_ROUNDS = int(os.environ.get("BCRYPT_ROUNDS", "12"))
-PASSWORD_RESET_EXPIRE_MINUTES = int(
-    os.environ.get("PASSWORD_RESET_EXPIRE_MINUTES", "60")
-)
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+REFRESH_COOKIE_NAME = "refresh_token"
 
 
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+def _hash_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def _hash_password(plain: str) -> str:
@@ -55,404 +48,433 @@ def _verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def _create_access_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": str(user_id), "exp": expire, "type": "access"}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+def _create_access_token(user_id: str, email: str) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "iat": now,
+        "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-def _validate_password_strength(password: str) -> Optional[str]:
+def _validate_password_strength(password: str) -> list[str]:
+    errors: list[str] = []
     if len(password) < 8:
-        return "Password must be at least 8 characters."
+        errors.append("Password must be at least 8 characters.")
     if not any(c.isupper() for c in password):
-        return "Password must contain at least one uppercase letter."
+        errors.append("Password must contain at least one uppercase letter.")
     if not any(c.islower() for c in password):
-        return "Password must contain at least one lowercase letter."
+        errors.append("Password must contain at least one lowercase letter.")
     if not any(c.isdigit() for c in password):
-        return "Password must contain at least one number."
-    return None
+        errors.append("Password must contain at least one number.")
+    return errors
 
 
-class AuthService:
-    def __init__(self, db: AsyncSession = Depends(get_db)):
-        self.db = db
-
-    async def register(self, body: RegisterRequest) -> RegisterResponse:
-        if body.password != body.confirm_password:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": {
-                        "code": "VALIDATION_ERROR",
-                        "message": "Passwords do not match.",
-                        "details": [{"field": "confirmPassword", "message": "Passwords do not match."}],
-                    }
-                },
-            )
-
-        strength_error = _validate_password_strength(body.password)
-        if strength_error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": {
-                        "code": "VALIDATION_ERROR",
-                        "message": strength_error,
-                        "details": [{"field": "password", "message": strength_error}],
-                    }
-                },
-            )
-
-        result = await self.db.execute(select(User).where(User.email == body.email))
-        existing = result.scalar_one_or_none()
-        if existing is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": {
-                        "code": "EMAIL_TAKEN",
-                        "message": "An account with this email already exists.",
-                        "details": [{"field": "email", "message": "An account with this email already exists."}],
-                    }
-                },
-            )
-
-        user = User(
-            full_name=body.full_name,
-            email=body.email,
-            password_hash=_hash_password(body.password),
-            is_active=True,
+async def login(body: LoginRequest, response: Response) -> LoginResponse:
+    async with get_db_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, email, full_name, password_hash, is_active FROM users WHERE email = $1",
+            body.email,
         )
-        self.db.add(user)
-        await self.db.commit()
-        await self.db.refresh(user)
-
-        access_token = _create_access_token(user.id)
-        return RegisterResponse(
-            accessToken=access_token,
-            user=MeResponse(
-                id=str(user.id),
-                fullName=user.full_name,
-                email=user.email,
-                createdAt=user.created_at.isoformat(),
-            ),
-        )
-
-    async def login(self, body: LoginRequest, response: Response) -> LoginResponse:
-        result = await self.db.execute(select(User).where(User.email == body.email))
-        user = result.scalar_one_or_none()
-
-        invalid_error = HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": {
+        if not row or not _verify_password(body.password, row["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
                     "code": "INVALID_CREDENTIALS",
                     "message": "Invalid email or password.",
                     "details": [],
-                }
+                },
+            )
+        if not row["is_active"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "ACCOUNT_INACTIVE",
+                    "message": "Invalid email or password.",
+                    "details": [],
+                },
+            )
+
+        user_id = str(row["id"])
+        access_token = _create_access_token(user_id, row["email"])
+        raw_refresh = secrets.token_hex(32)
+        refresh_hash = _hash_sha256(raw_refresh)
+        remember = body.rememberMe if body.rememberMe is not None else False
+        expire_days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
+        expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
+
+        await conn.execute(
+            """
+            INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, remember_me, created_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, now())
+            """,
+            uuid.UUID(user_id),
+            refresh_hash,
+            expires_at,
+            remember,
+        )
+
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=raw_refresh,
+        httponly=True,
+        samesite="lax",
+        secure=True,
+        expires=int(expires_at.timestamp()),
+    )
+
+    return LoginResponse(
+        accessToken=access_token,
+        tokenType="bearer",
+        user=MeResponse(
+            id=user_id,
+            email=row["email"],
+            fullName=row["full_name"],
+        ),
+    )
+
+
+async def register(body: RegisterRequest) -> RegisterResponse:
+    if body.password != body.confirmPassword:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "PASSWORD_MISMATCH",
+                "message": "Passwords do not match.",
+                "details": [],
             },
         )
 
-        if user is None or not _verify_password(body.password, user.password_hash):
-            raise invalid_error
-
-        if not user.is_active:
-            raise invalid_error
-
-        access_token = _create_access_token(user.id)
-
-        remember = body.remember_me or False
-        expire_days = REFRESH_TOKEN_EXPIRE_DAYS_REMEMBER if remember else REFRESH_TOKEN_EXPIRE_DAYS
-        raw_refresh = secrets.token_urlsafe(64)
-        expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
-
-        rt = RefreshToken(
-            user_id=user.id,
-            token_hash=_hash_token(raw_refresh),
-            expires_at=expires_at,
-            remember_me=remember,
-        )
-        self.db.add(rt)
-        await self.db.commit()
-
-        response.set_cookie(
-            key="refresh_token",
-            value=raw_refresh,
-            httponly=True,
-            samesite="lax",
-            secure=True,
-            max_age=int(timedelta(days=expire_days).total_seconds()),
-            path="/",
-        )
-
-        return LoginResponse(
-            accessToken=access_token,
-            user=MeResponse(
-                id=str(user.id),
-                fullName=user.full_name,
-                email=user.email,
-                createdAt=user.created_at.isoformat(),
-            ),
-        )
-
-    async def forgotPassword(self, body: ForgotPasswordRequest) -> ForgotPasswordResponse:
-        result = await self.db.execute(select(User).where(User.email == body.email))
-        user = result.scalar_one_or_none()
-
-        if user is not None and user.is_active:
-            raw_token = secrets.token_urlsafe(64)
-            token_hash = _hash_token(raw_token)
-            expires_at = datetime.now(timezone.utc) + timedelta(
-                minutes=PASSWORD_RESET_EXPIRE_MINUTES
-            )
-
-            pr = PasswordReset(
-                user_id=user.id,
-                token_hash=token_hash,
-                expires_at=expires_at,
-            )
-            self.db.add(pr)
-            await self.db.commit()
-
-            reset_link = f"{FRONTEND_URL}/reset-password?token={raw_token}"
-            # In production, send reset_link via email.
-            # Logging omitted to avoid leaking the token.
-
-        return ForgotPasswordResponse(
-            message="If an account with that email exists, a password reset link has been sent."
-        )
-
-    async def resetPassword(self, body: ResetPasswordRequest) -> ResetPasswordResponse:
-        if body.password != body.confirm_password:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": {
-                        "code": "VALIDATION_ERROR",
-                        "message": "Passwords do not match.",
-                        "details": [{"field": "confirmPassword", "message": "Passwords do not match."}],
-                    }
-                },
-            )
-
-        strength_error = _validate_password_strength(body.password)
-        if strength_error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": {
-                        "code": "VALIDATION_ERROR",
-                        "message": strength_error,
-                        "details": [{"field": "password", "message": strength_error}],
-                    }
-                },
-            )
-
-        token_hash = _hash_token(body.token)
-        now = datetime.now(timezone.utc)
-
-        result = await self.db.execute(
-            select(PasswordReset).where(
-                PasswordReset.token_hash == token_hash,
-                PasswordReset.used_at.is_(None),
-                PasswordReset.expires_at > now,
-            )
-        )
-        pr = result.scalar_one_or_none()
-
-        invalid_token_error = HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+    strength_errors = _validate_password_strength(body.password)
+    if strength_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
-                "error": {
+                "code": "WEAK_PASSWORD",
+                "message": strength_errors[0],
+                "details": strength_errors,
+            },
+        )
+
+    password_hash = _hash_password(body.password)
+
+    async with get_db_connection() as conn:
+        existing = await conn.fetchrow("SELECT id FROM users WHERE email = $1", body.email)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "EMAIL_TAKEN",
+                    "message": "An account with this email already exists.",
+                    "details": [],
+                },
+            )
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO users (id, full_name, email, password_hash, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, true, now(), now())
+            RETURNING id, full_name, email
+            """,
+            body.fullName,
+            body.email,
+            password_hash,
+        )
+
+    return RegisterResponse(
+        id=str(row["id"]),
+        email=row["email"],
+        fullName=row["full_name"],
+    )
+
+
+async def forgotPassword(body: ForgotPasswordRequest) -> ForgotPasswordResponse:
+    async with get_db_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM users WHERE email = $1 AND is_active = true",
+            body.email,
+        )
+        if row:
+            raw_token = secrets.token_hex(32)
+            token_hash = _hash_sha256(raw_token)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+
+            await conn.execute(
+                """
+                INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, now())
+                """,
+                row["id"],
+                token_hash,
+                expires_at,
+            )
+            # In a real system, send raw_token via email here.
+
+    return ForgotPasswordResponse(
+        message="If an account with that email exists, a password reset link has been sent."
+    )
+
+
+async def resetPassword(body: ResetPasswordRequest) -> ResetPasswordResponse:
+    if body.password != body.confirmPassword:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "PASSWORD_MISMATCH",
+                "message": "Passwords do not match.",
+                "details": [],
+            },
+        )
+
+    strength_errors = _validate_password_strength(body.password)
+    if strength_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "WEAK_PASSWORD",
+                "message": strength_errors[0],
+                "details": strength_errors,
+            },
+        )
+
+    token_hash = _hash_sha256(body.token)
+    now = datetime.now(timezone.utc)
+
+    async with get_db_connection() as conn:
+        reset_row = await conn.fetchrow(
+            """
+            SELECT id, user_id, expires_at, used_at
+            FROM password_resets
+            WHERE token_hash = $1
+            """,
+            token_hash,
+        )
+
+        if not reset_row:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
                     "code": "INVALID_RESET_TOKEN",
                     "message": "This password reset link is invalid or has expired.",
                     "details": [],
-                }
+                },
+            )
+
+        if reset_row["used_at"] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "RESET_TOKEN_USED",
+                    "message": "This password reset link is invalid or has expired.",
+                    "details": [],
+                },
+            )
+
+        expires_at = reset_row["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if now > expires_at:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "RESET_TOKEN_EXPIRED",
+                    "message": "This password reset link is invalid or has expired.",
+                    "details": [],
+                },
+            )
+
+        new_hash = _hash_password(body.password)
+        user_id = reset_row["user_id"]
+
+        await conn.execute(
+            "UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2",
+            new_hash,
+            user_id,
+        )
+
+        await conn.execute(
+            "UPDATE password_resets SET used_at = $1 WHERE id = $2",
+            now,
+            reset_row["id"],
+        )
+
+        # Revoke all existing refresh tokens for the user for security.
+        await conn.execute(
+            "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+            user_id,
+        )
+
+    return ResetPasswordResponse(
+        message="Your password has been reset successfully."
+    )
+
+
+async def me(request: Request) -> MeResponse:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "MISSING_TOKEN",
+                "message": "Authentication required.",
+                "details": [],
+            },
+        )
+    token = auth_header[len("Bearer "):]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "TOKEN_EXPIRED",
+                "message": "Authentication required.",
+                "details": [],
+            },
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "INVALID_TOKEN",
+                "message": "Authentication required.",
+                "details": [],
             },
         )
 
-        if pr is None:
-            raise invalid_token_error
+    user_id = payload.get("sub")
+    async with get_db_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, email, full_name, is_active FROM users WHERE id = $1",
+            uuid.UUID(user_id),
+        )
+    if not row or not row["is_active"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "USER_NOT_FOUND",
+                "message": "Authentication required.",
+                "details": [],
+            },
+        )
+    return MeResponse(
+        id=str(row["id"]),
+        email=row["email"],
+        fullName=row["full_name"],
+    )
 
-        user_result = await self.db.execute(select(User).where(User.id == pr.user_id))
-        user = user_result.scalar_one_or_none()
 
-        if user is None or not user.is_active:
-            raise invalid_token_error
-
-        user.password_hash = _hash_password(body.password)
-        pr.used_at = now
-        await self.db.commit()
-
-        return ResetPasswordResponse(message="Your password has been reset successfully. You can now log in.")
-
-    async def me(self, credentials: Optional[HTTPAuthorizationCredentials]) -> MeResponse:
-        token = credentials.credentials if credentials else None
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": {
-                        "code": "UNAUTHORIZED",
-                        "message": "Authentication required.",
-                        "details": [],
-                    }
-                },
+async def logout(body: LogoutRequest, response: Response) -> LogoutResponse:
+    refresh_token = body.refreshToken if body.refreshToken else None
+    if refresh_token:
+        token_hash = _hash_sha256(refresh_token)
+        async with get_db_connection() as conn:
+            await conn.execute(
+                "UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL",
+                token_hash,
             )
+    response.delete_cookie(key=REFRESH_COOKIE_NAME)
+    return LogoutResponse(message="Logged out successfully.")
 
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_id: str = payload.get("sub")
-            if not user_id or payload.get("type") != "access":
-                raise JWTError()
-        except JWTError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": {
-                        "code": "INVALID_TOKEN",
-                        "message": "Invalid or expired token.",
-                        "details": [],
-                    }
-                },
-            )
 
-        result = await self.db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
+async def refresh(body: RefreshRequest, response: Response) -> RefreshResponse:
+    raw_token = body.refreshToken
+    token_hash = _hash_sha256(raw_token)
+    now = datetime.now(timezone.utc)
 
-        if user is None or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": {
-                        "code": "UNAUTHORIZED",
-                        "message": "Authentication required.",
-                        "details": [],
-                    }
-                },
-            )
-
-        return MeResponse(
-            id=str(user.id),
-            fullName=user.full_name,
-            email=user.email,
-            createdAt=user.created_at.isoformat(),
+    async with get_db_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked_at, rt.remember_me,
+                   u.email, u.full_name, u.is_active
+            FROM refresh_tokens rt
+            JOIN users u ON u.id = rt.user_id
+            WHERE rt.token_hash = $1
+            """,
+            token_hash,
         )
 
-    async def logout(
-        self,
-        body: LogoutRequest,
-        credentials: Optional[HTTPAuthorizationCredentials],
-        response: Response,
-    ) -> LogoutResponse:
-        if body.refresh_token:
-            token_hash = _hash_token(body.refresh_token)
-            now = datetime.now(timezone.utc)
-            result = await self.db.execute(
-                select(RefreshToken).where(
-                    RefreshToken.token_hash == token_hash,
-                    RefreshToken.revoked_at.is_(None),
-                )
-            )
-            rt = result.scalar_one_or_none()
-            if rt is not None:
-                rt.revoked_at = now
-                await self.db.commit()
-
-        response.delete_cookie(key="refresh_token", path="/")
-        return LogoutResponse(message="Logged out successfully.")
-
-    async def refresh(
-        self,
-        credentials: Optional[HTTPAuthorizationCredentials],
-        response: Response,
-    ) -> RefreshResponse:
-        raw_token = credentials.credentials if credentials else None
-        if not raw_token:
+        if not row:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={
-                    "error": {
-                        "code": "UNAUTHORIZED",
-                        "message": "Refresh token required.",
-                        "details": [],
-                    }
+                    "code": "INVALID_REFRESH_TOKEN",
+                    "message": "Session is invalid or has expired.",
+                    "details": [],
                 },
             )
 
-        token_hash = _hash_token(raw_token)
-        now = datetime.now(timezone.utc)
-
-        result = await self.db.execute(
-            select(RefreshToken).where(
-                RefreshToken.token_hash == token_hash,
-                RefreshToken.revoked_at.is_(None),
-                RefreshToken.expires_at > now,
+        if row["revoked_at"] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "REFRESH_TOKEN_REVOKED",
+                    "message": "Session is invalid or has expired.",
+                    "details": [],
+                },
             )
+
+        expires_at = row["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if now > expires_at:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "REFRESH_TOKEN_EXPIRED",
+                    "message": "Session is invalid or has expired.",
+                    "details": [],
+                },
+            )
+
+        if not row["is_active"]:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "ACCOUNT_INACTIVE",
+                    "message": "Session is invalid or has expired.",
+                    "details": [],
+                },
+            )
+
+        # Revoke old token.
+        await conn.execute(
+            "UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1",
+            row["id"],
         )
-        rt = result.scalar_one_or_none()
 
-        if rt is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": {
-                        "code": "INVALID_TOKEN",
-                        "message": "Invalid or expired refresh token.",
-                        "details": [],
-                    }
-                },
-            )
-
-        rt.revoked_at = now
-
-        remember = rt.remember_me or False
-        expire_days = REFRESH_TOKEN_EXPIRE_DAYS_REMEMBER if remember else REFRESH_TOKEN_EXPIRE_DAYS
-        new_raw = secrets.token_urlsafe(64)
+        # Issue new tokens.
+        user_id = str(row["user_id"])
+        access_token = _create_access_token(user_id, row["email"])
+        new_raw_refresh = secrets.token_hex(32)
+        new_refresh_hash = _hash_sha256(new_raw_refresh)
+        remember = row["remember_me"]
+        expire_days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
         new_expires_at = now + timedelta(days=expire_days)
 
-        new_rt = RefreshToken(
-            user_id=rt.user_id,
-            token_hash=_hash_token(new_raw),
-            expires_at=new_expires_at,
-            remember_me=remember,
-        )
-        self.db.add(new_rt)
-        await self.db.commit()
-
-        user_result = await self.db.execute(select(User).where(User.id == rt.user_id))
-        user = user_result.scalar_one_or_none()
-
-        if user is None or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": {
-                        "code": "UNAUTHORIZED",
-                        "message": "Authentication required.",
-                        "details": [],
-                    }
-                },
-            )
-
-        access_token = _create_access_token(user.id)
-
-        response.set_cookie(
-            key="refresh_token",
-            value=new_raw,
-            httponly=True,
-            samesite="lax",
-            secure=True,
-            max_age=int(timedelta(days=expire_days).total_seconds()),
-            path="/",
+        await conn.execute(
+            """
+            INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, remember_me, created_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, now())
+            """,
+            uuid.UUID(user_id),
+            new_refresh_hash,
+            new_expires_at,
+            remember,
         )
 
-        return RefreshResponse(
-            accessToken=access_token,
-            user=MeResponse(
-                id=str(user.id),
-                fullName=user.full_name,
-                email=user.email,
-                createdAt=user.created_at.isoformat(),
-            ),
-        )
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=new_raw_refresh,
+        httponly=True,
+        samesite="lax",
+        secure=True,
+        expires=int(new_expires_at.timestamp()),
+    )
+
+    return RefreshResponse(
+        accessToken=access_token,
+        tokenType="bearer",
+    )

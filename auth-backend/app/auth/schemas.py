@@ -1,36 +1,36 @@
-from typing import List, Optional
-
 from pydantic import BaseModel, EmailStr
-
-
-class RegisterRequest(BaseModel):
-    full_name: str
-    email: EmailStr
-    password: str
-    confirm_password: str
-
-
-class MeResponse(BaseModel):
-    id: str
-    fullName: str
-    email: str
-    createdAt: str
-
-
-class RegisterResponse(BaseModel):
-    accessToken: str
-    user: MeResponse
+from typing import Optional
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    remember_me: Optional[bool] = False
+    rememberMe: Optional[bool] = None
+
+
+class MeResponse(BaseModel):
+    id: str
+    email: str
+    fullName: str
 
 
 class LoginResponse(BaseModel):
     accessToken: str
+    tokenType: str
     user: MeResponse
+
+
+class RegisterRequest(BaseModel):
+    fullName: str
+    email: EmailStr
+    password: str
+    confirmPassword: str
+
+
+class RegisterResponse(BaseModel):
+    id: str
+    email: str
+    fullName: str
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -44,7 +44,7 @@ class ForgotPasswordResponse(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str
-    confirm_password: str
+    confirmPassword: str
 
 
 class ResetPasswordResponse(BaseModel):
@@ -52,28 +52,27 @@ class ResetPasswordResponse(BaseModel):
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: Optional[str] = None
+    refreshToken: Optional[str] = None
 
 
 class LogoutResponse(BaseModel):
     message: str
 
 
+class RefreshRequest(BaseModel):
+    refreshToken: str
+
+
 class RefreshResponse(BaseModel):
     accessToken: str
-    user: MeResponse
+    tokenType: str
 
 
 class ErrorDetail(BaseModel):
-    field: str
-    message: str
-
-
-class ErrorBody(BaseModel):
     code: str
     message: str
-    details: List[ErrorDetail]
+    details: list[str] = []
 
 
 class ErrorResponse(BaseModel):
-    error: ErrorBody
+    error: ErrorDetail
