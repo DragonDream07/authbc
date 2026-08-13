@@ -1,11 +1,12 @@
-const API_BASE = '/api';
+import axios from 'axios';
 
-export interface RegisterRequest {
-  fullName: string;
-  email: string;
-  password: string;
-  confirmPassword: string;
-}
+const apiClient = axios.create({
+  baseURL: process.env.REACT_APP_API_URL ?? 'http://localhost:8000',
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
 export interface LoginRequest {
   email: string;
@@ -13,8 +14,34 @@ export interface LoginRequest {
   rememberMe?: boolean;
 }
 
+export interface LoginResponse {
+  accessToken: string;
+  tokenType: string;
+  user: UserResponse;
+}
+
+export interface RegisterRequest {
+  fullName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  acceptTerms: boolean;
+}
+
+export interface RegisterResponse {
+  id: string;
+  fullName: string;
+  email: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface ForgotPasswordRequest {
   email: string;
+}
+
+export interface ForgotPasswordResponse {
+  message: string;
 }
 
 export interface ResetPasswordRequest {
@@ -23,138 +50,70 @@ export interface ResetPasswordRequest {
   confirmPassword: string;
 }
 
-export interface AuthUser {
+export interface ResetPasswordResponse {
+  message: string;
+}
+
+export interface UserResponse {
   id: string;
   fullName: string;
   email: string;
   isActive: boolean;
   createdAt: string;
-  updatedAt: string;
 }
 
-export interface AuthTokens {
+export interface RefreshResponse {
   accessToken: string;
   tokenType: string;
 }
 
-export interface ApiError {
-  code: string;
+export interface LogoutResponse {
   message: string;
-  details?: Record<string, unknown>;
 }
 
-class AuthApiError extends Error {
-  code: string;
-  details?: Record<string, unknown>;
+export const login = async (data: LoginRequest): Promise<LoginResponse> => {
+  const response = await apiClient.post<LoginResponse>('/auth/login', data);
+  return response.data;
+};
 
-  constructor(code: string, message: string, details?: Record<string, unknown>) {
-    super(message);
-    this.name = 'AuthApiError';
-    this.code = code;
-    this.details = details;
-  }
-}
+export const register = async (data: RegisterRequest): Promise<RegisterResponse> => {
+  const response = await apiClient.post<RegisterResponse>('/auth/register', data);
+  return response.data;
+};
 
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (response.ok) {
-    const text = await response.text();
-    if (!text) return undefined as unknown as T;
-    return JSON.parse(text) as T;
-  }
-
-  let errorBody: { error?: ApiError } | null = null;
-  try {
-    errorBody = await response.json();
-  } catch {
-    throw new AuthApiError('UNKNOWN_ERROR', 'Something went wrong. Please try again.');
-  }
-
-  const apiErr = errorBody?.error;
-  throw new AuthApiError(
-    apiErr?.code ?? 'UNKNOWN_ERROR',
-    apiErr?.message ?? 'Something went wrong. Please try again.',
-    apiErr?.details,
+export const forgotPassword = async (
+  data: ForgotPasswordRequest
+): Promise<ForgotPasswordResponse> => {
+  const response = await apiClient.post<ForgotPasswordResponse>(
+    '/auth/forgot-password',
+    data
   );
-}
+  return response.data;
+};
 
-export async function register(data: RegisterRequest): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      full_name: data.fullName,
-      email: data.email,
-      password: data.password,
-      confirm_password: data.confirmPassword,
-    }),
-  });
-  return handleResponse<void>(response);
-}
+export const resetPassword = async (
+  data: ResetPasswordRequest
+): Promise<ResetPasswordResponse> => {
+  const response = await apiClient.post<ResetPasswordResponse>(
+    '/auth/reset-password',
+    data
+  );
+  return response.data;
+};
 
-export async function login(data: LoginRequest): Promise<AuthTokens> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      email: data.email,
-      password: data.password,
-      remember_me: data.rememberMe ?? false,
-    }),
-  });
-  return handleResponse<AuthTokens>(response);
-}
+export const me = async (): Promise<UserResponse> => {
+  const response = await apiClient.get<UserResponse>('/auth/me');
+  return response.data;
+};
 
-export async function forgotPassword(data: ForgotPasswordRequest): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/forgot-password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ email: data.email }),
-  });
-  return handleResponse<void>(response);
-}
+export const logout = async (): Promise<LogoutResponse> => {
+  const response = await apiClient.post<LogoutResponse>('/auth/logout');
+  return response.data;
+};
 
-export async function resetPassword(data: ResetPasswordRequest): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/reset-password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      token: data.token,
-      password: data.password,
-      confirm_password: data.confirmPassword,
-    }),
-  });
-  return handleResponse<void>(response);
-}
+export const refresh = async (): Promise<RefreshResponse> => {
+  const response = await apiClient.post<RefreshResponse>('/auth/refresh');
+  return response.data;
+};
 
-export async function me(): Promise<AuthUser> {
-  const response = await fetch(`${API_BASE}/auth/me`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-  });
-  return handleResponse<AuthUser>(response);
-}
-
-export async function logout(): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/logout`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-  });
-  return handleResponse<void>(response);
-}
-
-export async function refresh(): Promise<AuthTokens> {
-  const response = await fetch(`${API_BASE}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-  });
-  return handleResponse<AuthTokens>(response);
-}
-
-export { AuthApiError };
+export default apiClient;
