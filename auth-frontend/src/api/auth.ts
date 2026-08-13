@@ -1,51 +1,20 @@
 const API_BASE = '/api';
 
-export interface LoginRequest {
-  email: string;
-  password: string;
-  rememberMe: boolean;
-}
-
-export interface LoginResponse {
-  accessToken: string;
-  tokenType: string;
-  user: {
-    id: string;
-    fullName: string;
-    email: string;
-    isActive: boolean;
-    createdAt: string;
-    updatedAt: string;
-  };
-}
-
 export interface RegisterRequest {
   fullName: string;
   email: string;
   password: string;
   confirmPassword: string;
-  acceptTerms: boolean;
 }
 
-export interface RegisterResponse {
-  accessToken: string;
-  tokenType: string;
-  user: {
-    id: string;
-    fullName: string;
-    email: string;
-    isActive: boolean;
-    createdAt: string;
-    updatedAt: string;
-  };
+export interface LoginRequest {
+  email: string;
+  password: string;
+  rememberMe?: boolean;
 }
 
 export interface ForgotPasswordRequest {
   email: string;
-}
-
-export interface ForgotPasswordResponse {
-  message: string;
 }
 
 export interface ResetPasswordRequest {
@@ -54,11 +23,7 @@ export interface ResetPasswordRequest {
   confirmPassword: string;
 }
 
-export interface ResetPasswordResponse {
-  message: string;
-}
-
-export interface MeResponse {
+export interface AuthUser {
   id: string;
   fullName: string;
   email: string;
@@ -67,114 +32,129 @@ export interface MeResponse {
   updatedAt: string;
 }
 
-export interface LogoutResponse {
-  message: string;
-}
-
-export interface RefreshResponse {
+export interface AuthTokens {
   accessToken: string;
   tokenType: string;
 }
 
-class ApiError extends Error {
-  public readonly status: number;
-  public readonly code: string;
+export interface ApiError {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
 
-  constructor(message: string, status: number, code: string) {
+class AuthApiError extends Error {
+  code: string;
+  details?: Record<string, unknown>;
+
+  constructor(code: string, message: string, details?: Record<string, unknown>) {
     super(message);
-    this.name = 'ApiError';
-    this.status = status;
+    this.name = 'AuthApiError';
     this.code = code;
+    this.details = details;
   }
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
-    if (response.status === 204) {
-      return {} as T;
-    }
-    return response.json() as Promise<T>;
+    const text = await response.text();
+    if (!text) return undefined as unknown as T;
+    return JSON.parse(text) as T;
   }
 
-  let errorMessage = 'Invalid email or password.';
-  let errorCode = 'UNKNOWN_ERROR';
-
+  let errorBody: { error?: ApiError } | null = null;
   try {
-    const body = await response.json();
-    if (body && body.error) {
-      errorMessage = body.error.message ?? errorMessage;
-      errorCode = body.error.code ?? errorCode;
-    }
+    errorBody = await response.json();
   } catch {
-    // ignore parse errors; use defaults
+    throw new AuthApiError('UNKNOWN_ERROR', 'Something went wrong. Please try again.');
   }
 
-  throw new ApiError(errorMessage, response.status, errorCode);
+  const apiErr = errorBody?.error;
+  throw new AuthApiError(
+    apiErr?.code ?? 'UNKNOWN_ERROR',
+    apiErr?.message ?? 'Something went wrong. Please try again.',
+    apiErr?.details,
+  );
 }
 
-export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<LoginResponse>(response);
-}
-
-export async function register(payload: RegisterRequest): Promise<RegisterResponse> {
+export async function register(data: RegisterRequest): Promise<void> {
   const response = await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      full_name: data.fullName,
+      email: data.email,
+      password: data.password,
+      confirm_password: data.confirmPassword,
+    }),
   });
-  return handleResponse<RegisterResponse>(response);
+  return handleResponse<void>(response);
 }
 
-export async function forgotPassword(payload: ForgotPasswordRequest): Promise<ForgotPasswordResponse> {
+export async function login(data: LoginRequest): Promise<AuthTokens> {
+  const response = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      email: data.email,
+      password: data.password,
+      remember_me: data.rememberMe ?? false,
+    }),
+  });
+  return handleResponse<AuthTokens>(response);
+}
+
+export async function forgotPassword(data: ForgotPasswordRequest): Promise<void> {
   const response = await fetch(`${API_BASE}/auth/forgot-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ email: data.email }),
   });
-  return handleResponse<ForgotPasswordResponse>(response);
+  return handleResponse<void>(response);
 }
 
-export async function resetPassword(payload: ResetPasswordRequest): Promise<ResetPasswordResponse> {
+export async function resetPassword(data: ResetPasswordRequest): Promise<void> {
   const response = await fetch(`${API_BASE}/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      token: data.token,
+      password: data.password,
+      confirm_password: data.confirmPassword,
+    }),
   });
-  return handleResponse<ResetPasswordResponse>(response);
+  return handleResponse<void>(response);
 }
 
-export async function me(): Promise<MeResponse> {
+export async function me(): Promise<AuthUser> {
   const response = await fetch(`${API_BASE}/auth/me`, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
   });
-  return handleResponse<MeResponse>(response);
+  return handleResponse<AuthUser>(response);
 }
 
-export async function logout(): Promise<LogoutResponse> {
+export async function logout(): Promise<void> {
   const response = await fetch(`${API_BASE}/auth/logout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
   });
-  return handleResponse<LogoutResponse>(response);
+  return handleResponse<void>(response);
 }
 
-export async function refresh(): Promise<RefreshResponse> {
+export async function refresh(): Promise<AuthTokens> {
   const response = await fetch(`${API_BASE}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
   });
-  return handleResponse<RefreshResponse>(response);
+  return handleResponse<AuthTokens>(response);
 }
+
+export { AuthApiError };
