@@ -1,0 +1,205 @@
+:root {
+  /* Colors — Brand */
+  --color-accent-primary: #4f46e5;
+  --color-accent-primary-hover: #4338ca;
+  --color-accent-primary-active: #3730a3;
+  --color-accent-primary-subtle: #eef2ff;
+
+  /* Colors — Semantic */
+  --color-success: #16a34a;
+  --color-success-subtle: #f0fdf4;
+  --color-error: #dc2626;
+  --color-error-subtle: #fef2f2;
+  --color-warning: #d97706;
+  --color-warning-subtle: #fffbeb;
+  --color-info: #2563eb;
+  --color-info-subtle: #eff6ff;
+
+  /* Colors — Neutrals */
+  --color-neutral-0: #ffffff;
+  --color-neutral-50: #f9fafb;
+  --color-neutral-100: #f3f4f6;
+  --color-neutral-200: #e5e7eb;
+  --color-neutral-300: #d1d5db;
+  --color-neutral-400: #9ca3af;
+  --color-neutral-500: #6b7280;
+  --color-neutral-600: #4b5563;
+  --color-neutral-700: #374151;
+  --color-neutral-800: #1f2937;
+  --color-neutral-900: #111827;
+
+  /* Colors — Text */
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-disabled: #9ca3af;
+  --color-text-inverse: #ffffff;
+  --color-text-link: #4f46e5;
+  --color-text-link-hover: #4338ca;
+  --color-text-error: #dc2626;
+  --color-text-success: #16a34a;
+
+  /* Colors — Surface */
+  --color-surface-page: #f3f4f6;
+  --color-surface-card: #ffffff;
+  --color-surface-input: #ffffff;
+  --color-surface-input-disabled: #f9fafb;
+
+  /* Colors — Border */
+  --color-border-default: #d1d5db;
+  --color-border-focus: #4f46e5;
+  --color-border-error: #dc2626;
+  --color-border-success: #16a34a;
+  --color-border-disabled: #e5e7eb;
+
+  /* Typography — Font Family */
+  --font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* Typography — Font Size */
+  --font-size-xs: 0.75rem;    /* 12px */
+  --font-size-sm: 0.875rem;   /* 14px */
+  --font-size-md: 1rem;       /* 16px */
+  --font-size-lg: 1.125rem;   /* 18px */
+  --font-size-xl: 1.25rem;    /* 20px */
+  --font-size-2xl: 1.5rem;    /* 24px */
+  --font-size-3xl: 1.875rem;  /* 30px */
+
+  /* Typography — Font Weight */
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Typography — Line Height */
+  --line-height-tight: 1.25;
+  --line-height-snug: 1.375;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.625;
+
+  /* Typography — Letter Spacing */
+  --letter-spacing-tight: -0.025em;
+  --letter-spacing-normal: 0em;
+  --letter-spacing-wide: 0.025em;
+  --letter-spacing-wider: 0.05em;
+  --letter-spacing-widest: 0.1em;
+
+  /* Spacing */
+  --spacing-0: 0px;
+  --spacing-1: 0.25rem;   /* 4px */
+  --spacing-2: 0.5rem;    /* 8px */
+  --spacing-3: 0.75rem;   /* 12px */
+  --spacing-4: 1rem;      /* 16px */
+  --spacing-5: 1.25rem;   /* 20px */
+  --spacing-6: 1.5rem;    /* 24px */
+  --spacing-7: 1.75rem;   /* 28px */
+  --spacing-8: 2rem;      /* 32px */
+  --spacing-10: 2.5rem;   /* 40px */
+  --spacing-12: 3rem;     /* 48px */
+  --spacing-16: 4rem;     /* 64px */
+  --spacing-20: 5rem;     /* 80px */
+  --spacing-24: 6rem;     /* 96px */
+
+  /* Border Radius */
+  --radius-none: 0px;
+  --radius-sm: 0.125rem;   /* 2px */
+  --radius-md: 0.375rem;   /* 6px */
+  --radius-lg: 0.5rem;     /* 8px */
+  --radius-xl: 0.75rem;    /* 12px */
+  --radius-2xl: 1rem;      /* 16px */
+  --radius-full: 9999px;
+
+  /* Border Width */
+  --border-width-none: 0px;
+  --border-width-thin: 1px;
+  --border-width-medium: 2px;
+  --border-width-thick: 4px;
+
+  /* Shadows */
+  --shadow-none: none;
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+
+  /* Transitions */
+  --transition-duration-fast: 100ms;
+  --transition-duration-normal: 150ms;
+  --transition-duration-slow: 200ms;
+  --transition-duration-slower: 300ms;
+  --transition-easing-default: ease-in-out;
+  --transition-easing-in: ease-in;
+  --transition-easing-out: ease-out;
+  --transition-default: all 150ms ease-in-out;
+
+  /* Z-index */
+  --z-index-below: -1;
+  --z-index-base: 0;
+  --z-index-raised: 10;
+  --z-index-dropdown: 100;
+  --z-index-sticky: 200;
+  --z-index-overlay: 300;
+  --z-index-modal: 400;
+  --z-index-toast: 500;
+
+  /* Layout */
+  --layout-card-width: 28rem;         /* 448px */
+  --layout-card-padding: 2rem;        /* 32px */
+  --layout-card-gap: 1.5rem;          /* 24px */
+  --layout-page-bg: var(--color-surface-page);
+  --layout-card-bg: var(--color-surface-card);
+
+  /* Form Controls */
+  --input-height: 2.5rem;             /* 40px */
+  --input-padding-x: 0.75rem;         /* 12px */
+  --input-padding-y: 0.5rem;          /* 8px */
+  --input-border-radius: var(--radius-md);
+  --input-border-color: var(--color-border-default);
+  --input-border-color-focus: var(--color-border-focus);
+  --input-border-color-error: var(--color-border-error);
+  --input-bg: var(--color-surface-input);
+  --input-bg-disabled: var(--color-surface-input-disabled);
+  --input-font-size: var(--font-size-sm);
+  --input-text-color: var(--color-text-primary);
+  --input-placeholder-color: var(--color-text-disabled);
+  --input-focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  --input-focus-ring-error: 0 0 0 3px rgba(220, 38, 38, 0.15);
+
+  /* Button — Primary */
+  --btn-primary-bg: var(--color-accent-primary);
+  --btn-primary-bg-hover: var(--color-accent-primary-hover);
+  --btn-primary-bg-active: var(--color-accent-primary-active);
+  --btn-primary-bg-disabled: var(--color-neutral-300);
+  --btn-primary-text: var(--color-text-inverse);
+  --btn-primary-text-disabled: var(--color-neutral-500);
+  --btn-primary-border-radius: var(--radius-md);
+  --btn-primary-font-size: var(--font-size-sm);
+  --btn-primary-font-weight: var(--font-weight-medium);
+  --btn-primary-height: 2.5rem;
+  --btn-primary-padding-x: 1rem;
+
+  /* Password Strength Meter */
+  --strength-bar-height: 0.25rem;     /* 4px */
+  --strength-bar-radius: var(--radius-full);
+  --strength-color-0: var(--color-neutral-200);
+  --strength-color-1: var(--color-error);
+  --strength-color-2: var(--color-warning);
+  --strength-color-3: #65a30d;
+  --strength-color-4: var(--color-success);
+
+  /* Alert Banner */
+  --alert-border-radius: var(--radius-md);
+  --alert-padding-x: var(--spacing-4);
+  --alert-padding-y: var(--spacing-3);
+  --alert-font-size: var(--font-size-sm);
+  --alert-error-bg: var(--color-error-subtle);
+  --alert-error-text: var(--color-error);
+  --alert-error-border: var(--color-error);
+  --alert-success-bg: var(--color-success-subtle);
+  --alert-success-text: var(--color-success);
+  --alert-success-border: var(--color-success);
+  --alert-info-bg: var(--color-info-subtle);
+  --alert-info-text: var(--color-info);
+  --alert-info-border: var(--color-info);
+}
