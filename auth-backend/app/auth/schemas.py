@@ -1,52 +1,35 @@
-from __future__ import annotations
-
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
 
-# ---------------------------------------------------------------------------
-# Register
-# ---------------------------------------------------------------------------
-
 class RegisterRequest(BaseModel):
-    full_name: str = Field(..., min_length=1, max_length=255)
+    full_name: str = Field(..., alias="fullName")
     email: EmailStr
-    password: str = Field(..., min_length=8)
-    confirm_password: str = Field(..., min_length=8)
+    password: str
+    confirm_password: str = Field(..., alias="confirmPassword")
+    terms_accepted: bool = Field(..., alias="termsAccepted")
+
+    model_config = {"populate_by_name": True}
 
 
 class RegisterResponse(BaseModel):
-    id: int
-    full_name: str
+    id: str
+    fullName: str
     email: str
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
+    createdAt: str
 
-
-# ---------------------------------------------------------------------------
-# Login
-# ---------------------------------------------------------------------------
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    remember_me: Optional[bool] = False
+    rememberMe: Optional[bool] = False
 
 
 class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str
-    id: int
-    full_name: str
-    email: str
+    accessToken: str
+    tokenType: str
 
-
-# ---------------------------------------------------------------------------
-# Forgot Password
-# ---------------------------------------------------------------------------
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -56,66 +39,46 @@ class ForgotPasswordResponse(BaseModel):
     message: str
 
 
-# ---------------------------------------------------------------------------
-# Reset Password
-# ---------------------------------------------------------------------------
-
 class ResetPasswordRequest(BaseModel):
     token: str
-    password: str = Field(..., min_length=8)
-    confirm_password: str = Field(..., min_length=8)
+    password: str
+    confirm_password: str = Field(..., alias="confirmPassword")
+
+    model_config = {"populate_by_name": True}
 
 
 class ResetPasswordResponse(BaseModel):
     message: str
 
 
-# ---------------------------------------------------------------------------
-# Me
-# ---------------------------------------------------------------------------
-
 class MeResponse(BaseModel):
-    id: int
-    full_name: str
+    id: str
+    fullName: str
     email: str
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
+    createdAt: str
 
-
-# ---------------------------------------------------------------------------
-# Logout
-# ---------------------------------------------------------------------------
 
 class LogoutRequest(BaseModel):
-    refresh_token: Optional[str] = None
+    refreshToken: Optional[str] = None
 
 
 class LogoutResponse(BaseModel):
     message: str
 
 
-# ---------------------------------------------------------------------------
-# Refresh
-# ---------------------------------------------------------------------------
-
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refreshToken: Optional[str] = None
 
 
 class RefreshResponse(BaseModel):
-    access_token: str
-    token_type: str
+    accessToken: str
+    tokenType: str
 
-
-# ---------------------------------------------------------------------------
-# Error
-# ---------------------------------------------------------------------------
 
 class ErrorDetail(BaseModel):
     code: str
     message: str
-    details: Optional[dict] = None
+    details: dict = Field(default_factory=dict)
 
 
 class ErrorResponse(BaseModel):

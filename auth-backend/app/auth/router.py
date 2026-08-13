@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 from app.auth.schemas import (
     LoginRequest,
     LoginResponse,
@@ -16,10 +18,14 @@ from app.auth.schemas import (
     ErrorResponse,
 )
 from app.auth.service import AuthService
-from app.core.dependencies import get_current_user, get_auth_service
-from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_auth_service() -> AuthService:
+    return AuthService()
 
 
 @router.post(
@@ -82,16 +88,15 @@ async def resetPassword(
     operation_id="me",
 )
 async def me(
-    current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    service: AuthService = Depends(get_auth_service),
 ) -> MeResponse:
-    return MeResponse(
-        id=current_user.id,
-        full_name=current_user.full_name,
-        email=current_user.email,
-        is_active=current_user.is_active,
-        created_at=current_user.created_at,
-        updated_at=current_user.updated_at,
-    )
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    return await service.me(credentials.credentials)
 
 
 @router.post(
@@ -103,9 +108,11 @@ async def me(
 async def logout(
     body: LogoutRequest,
     response: Response,
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     service: AuthService = Depends(get_auth_service),
 ) -> LogoutResponse:
-    return await service.logout(body, response)
+    access_token: str | None = credentials.credentials if credentials else None
+    return await service.logout(body, access_token, response)
 
 
 @router.post(

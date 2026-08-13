@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import hashlib
-import secrets
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
-from fastapi import Response
-from jose import JWTError, jwt
-from sqlalchemy.ext.asyncio import AsyncSession
+import jwt
+from fastapi import HTTPException, Response, status
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.auth.schemas import (
     ForgotPasswordRequest,
@@ -25,262 +27,90 @@ from app.auth.schemas import (
     ResetPasswordRequest,
     ResetPasswordResponse,
 )
-from app.core.config import settings
-from app.core.exceptions import (
-    AuthenticationError,
-    ConflictError,
-    NotFoundError,
-    ValidationError,
+from app.models.password_reset import PasswordReset
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
+
+DATABASE_URL: str = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@db:5432/authdb",
 )
-from app.repositories.password_reset_repository import PasswordResetRepository
-from app.repositories.refresh_token_repository import RefreshTokenRepository
-from app.repositories.user_repository import UserRepository
+JWT_SECRET: str = os.environ.get("JWT_SECRET", "changeme")
+JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
+    os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
+)
+REFRESH_TOKEN_EXPIRE_DAYS: int = int(
+    os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7")
+)
+REFRESH_TOKEN_REMEMBER_DAYS: int = int(
+    os.environ.get("REFRESH_TOKEN_REMEMBER_DAYS", "30")
+)
+BCRYPT_ROUNDS: int = int(os.environ.get("BCRYPT_ROUNDS", "12"))
+COOKIE_SECURE: bool = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
+
+_engine = create_async_engine(DATABASE_URL, echo=False)
+_async_session: sessionmaker = sessionmaker(
+    _engine, class_=AsyncSession, expire_on_commit=False
+)
 
 
-def _hash_token(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _hash_password(plain: str) -> str:
-    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=settings.BCRYPT_ROUNDS)).decode()
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def _verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
-
-
-def _create_access_token(user_id: int, email: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+def _make_access_token(user_id: str, email: str) -> str:
+    expire = _now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user_id),
         "email": email,
         "exp": expire,
+        "iat": _now(),
         "type": "access",
     }
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _make_refresh_token_value() -> str:
+    return hashlib.sha256(os.urandom(64)).hexdigest()
 
 
 def _decode_access_token(token: str) -> dict:
-    return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-
-
-class AuthService:
-    def __init__(
-        self,
-        session: AsyncSession,
-        user_repo: UserRepository,
-        refresh_token_repo: RefreshTokenRepository,
-        password_reset_repo: PasswordResetRepository,
-    ) -> None:
-        self._session = session
-        self._user_repo = user_repo
-        self._refresh_token_repo = refresh_token_repo
-        self._password_reset_repo = password_reset_repo
-
-    # ------------------------------------------------------------------
-    # register
-    # ------------------------------------------------------------------
-    async def register(self, body: RegisterRequest) -> RegisterResponse:
-        existing = await self._user_repo.get_by_email(body.email)
-        if existing is not None:
-            raise ConflictError(
-                code="EMAIL_TAKEN",
-                message="An account with this email already exists.",
-            )
-
-        password_hash = _hash_password(body.password)
-        user = await self._user_repo.create(
-            full_name=body.full_name,
-            email=body.email,
-            password_hash=password_hash,
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "access":
+            raise ValueError("wrong token type")
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired.",
         )
-        return RegisterResponse(
-            id=user.id,
-            full_name=user.full_name,
-            email=user.email,
-            is_active=user.is_active,
-            created_at=user.created_at,
-            updated_at=user.updated_at,
-        )
-
-    # ------------------------------------------------------------------
-    # login
-    # ------------------------------------------------------------------
-    async def login(self, body: LoginRequest, response: Response) -> LoginResponse:
-        user = await self._user_repo.get_by_email(body.email)
-        if user is None or not _verify_password(body.password, user.password_hash):
-            raise AuthenticationError(
-                code="INVALID_CREDENTIALS",
-                message="Invalid email or password.",
-            )
-
-        if not user.is_active:
-            raise AuthenticationError(
-                code="ACCOUNT_INACTIVE",
-                message="Invalid email or password.",
-            )
-
-        access_token = _create_access_token(user.id, user.email)
-
-        raw_refresh = secrets.token_urlsafe(64)
-        token_hash = _hash_token(raw_refresh)
-        remember_me: bool = body.remember_me if body.remember_me is not None else False
-        expire_days = (
-            settings.REFRESH_TOKEN_REMEMBER_DAYS
-            if remember_me
-            else settings.REFRESH_TOKEN_EXPIRE_DAYS
-        )
-        expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
-
-        await self._refresh_token_repo.create(
-            user_id=user.id,
-            token_hash=token_hash,
-            expires_at=expires_at,
-            remember_me=remember_me,
-        )
-
-        _set_refresh_cookie(response, raw_refresh, expires_at)
-
-        return LoginResponse(
-            access_token=access_token,
-            token_type="bearer",
-            id=user.id,
-            full_name=user.full_name,
-            email=user.email,
-        )
-
-    # ------------------------------------------------------------------
-    # forgotPassword
-    # ------------------------------------------------------------------
-    async def forgotPassword(self, body: ForgotPasswordRequest) -> ForgotPasswordResponse:
-        user = await self._user_repo.get_by_email(body.email)
-        if user is not None and user.is_active:
-            raw_token = secrets.token_urlsafe(64)
-            token_hash = _hash_token(raw_token)
-            expires_at = datetime.now(timezone.utc) + timedelta(
-                minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES
-            )
-            await self._password_reset_repo.create(
-                user_id=user.id,
-                token_hash=token_hash,
-                expires_at=expires_at,
-            )
-            # Email sending is handled by a background task / mailer outside this service.
-            # The raw_token would be passed to the mailer here in a full implementation.
-
-        return ForgotPasswordResponse(
-            message="If that email address is in our system, we emailed a password reset link."
-        )
-
-    # ------------------------------------------------------------------
-    # resetPassword
-    # ------------------------------------------------------------------
-    async def resetPassword(self, body: ResetPasswordRequest) -> ResetPasswordResponse:
-        token_hash = _hash_token(body.token)
-        reset_record = await self._password_reset_repo.get_valid_by_hash(token_hash)
-
-        if reset_record is None:
-            raise ValidationError(
-                code="INVALID_RESET_TOKEN",
-                message="This password reset link is invalid or has expired.",
-            )
-
-        new_hash = _hash_password(body.password)
-        await self._user_repo.update_password(reset_record.user_id, new_hash)
-        await self._password_reset_repo.mark_used(reset_record.id)
-        await self._refresh_token_repo.revoke_all_for_user(reset_record.user_id)
-
-        return ResetPasswordResponse(message="Your password has been reset successfully.")
-
-    # ------------------------------------------------------------------
-    # me  (thin — router handles it directly via get_current_user)
-    # ------------------------------------------------------------------
-    async def me(self, current_user_id: int) -> MeResponse:  # pragma: no cover
-        user = await self._user_repo.get_by_id(current_user_id)
-        if user is None:
-            raise NotFoundError(code="USER_NOT_FOUND", message="User not found.")
-        return MeResponse(
-            id=user.id,
-            full_name=user.full_name,
-            email=user.email,
-            is_active=user.is_active,
-            created_at=user.created_at,
-            updated_at=user.updated_at,
-        )
-
-    # ------------------------------------------------------------------
-    # logout
-    # ------------------------------------------------------------------
-    async def logout(self, body: LogoutRequest, response: Response) -> LogoutResponse:
-        if body.refresh_token:
-            token_hash = _hash_token(body.refresh_token)
-            await self._refresh_token_repo.revoke_by_hash(token_hash)
-
-        _clear_refresh_cookie(response)
-        return LogoutResponse(message="Logged out successfully.")
-
-    # ------------------------------------------------------------------
-    # refresh
-    # ------------------------------------------------------------------
-    async def refresh(self, body: RefreshRequest, response: Response) -> RefreshResponse:
-        token_hash = _hash_token(body.refresh_token)
-        record = await self._refresh_token_repo.get_valid_by_hash(token_hash)
-
-        if record is None:
-            raise AuthenticationError(
-                code="INVALID_REFRESH_TOKEN",
-                message="Refresh token is invalid or has expired.",
-            )
-
-        user = await self._user_repo.get_by_id(record.user_id)
-        if user is None or not user.is_active:
-            raise AuthenticationError(
-                code="INVALID_REFRESH_TOKEN",
-                message="Refresh token is invalid or has expired.",
-            )
-
-        # Rotate: revoke old token
-        await self._refresh_token_repo.revoke_by_hash(token_hash)
-
-        # Issue new refresh token
-        raw_refresh = secrets.token_urlsafe(64)
-        new_hash = _hash_token(raw_refresh)
-        expire_days = (
-            settings.REFRESH_TOKEN_REMEMBER_DAYS
-            if record.remember_me
-            else settings.REFRESH_TOKEN_EXPIRE_DAYS
-        )
-        expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
-        await self._refresh_token_repo.create(
-            user_id=user.id,
-            token_hash=new_hash,
-            expires_at=expires_at,
-            remember_me=record.remember_me,
-        )
-
-        access_token = _create_access_token(user.id, user.email)
-        _set_refresh_cookie(response, raw_refresh, expires_at)
-
-        return RefreshResponse(
-            access_token=access_token,
-            token_type="bearer",
+    except (jwt.InvalidTokenError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token.",
         )
 
 
-# ---------------------------------------------------------------------------
-# Cookie helpers
-# ---------------------------------------------------------------------------
-
-def _set_refresh_cookie(response: Response, raw_token: str, expires_at: datetime) -> None:
-    max_age = int((expires_at - datetime.now(timezone.utc)).total_seconds())
+def _set_refresh_cookie(response: Response, token_value: str, remember_me: bool) -> None:
+    max_age = (
+        REFRESH_TOKEN_REMEMBER_DAYS * 86400
+        if remember_me
+        else REFRESH_TOKEN_EXPIRE_DAYS * 86400
+    )
     response.set_cookie(
         key="refresh_token",
-        value=raw_token,
+        value=token_value,
         httponly=True,
         samesite="lax",
-        secure=settings.COOKIE_SECURE,
+        secure=COOKIE_SECURE,
         max_age=max_age,
-        path="/auth/refresh",
+        path="/auth",
     )
 
 
@@ -289,6 +119,324 @@ def _clear_refresh_cookie(response: Response) -> None:
         key="refresh_token",
         httponly=True,
         samesite="lax",
-        secure=settings.COOKIE_SECURE,
-        path="/auth/refresh",
+        secure=COOKIE_SECURE,
+        path="/auth",
     )
+
+
+class AuthService:
+    async def register(self, body: RegisterRequest) -> RegisterResponse:
+        async with _async_session() as session:
+            result = await session.execute(
+                select(User).where(User.email == body.email.lower())
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": {
+                            "code": "EMAIL_TAKEN",
+                            "message": "An account with this email already exists.",
+                            "details": {},
+                        }
+                    },
+                )
+
+            password_hash = bcrypt.hashpw(
+                body.password.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+            ).decode()
+
+            user = User(
+                full_name=body.full_name,
+                email=body.email.lower(),
+                password_hash=password_hash,
+                is_active=True,
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+
+            return RegisterResponse(
+                id=str(user.id),
+                fullName=user.full_name,
+                email=user.email,
+                createdAt=user.created_at.isoformat(),
+            )
+
+    async def login(self, body: LoginRequest, response: Response) -> LoginResponse:
+        async with _async_session() as session:
+            result = await session.execute(
+                select(User).where(User.email == body.email.lower())
+            )
+            user: Optional[User] = result.scalar_one_or_none()
+
+            invalid_exc = HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "error": {
+                        "code": "INVALID_CREDENTIALS",
+                        "message": "Invalid email or password.",
+                        "details": {},
+                    }
+                },
+            )
+
+            if user is None:
+                raise invalid_exc
+
+            if not bcrypt.checkpw(body.password.encode(), user.password_hash.encode()):
+                raise invalid_exc
+
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": {
+                            "code": "ACCOUNT_INACTIVE",
+                            "message": "Your account is inactive.",
+                            "details": {},
+                        }
+                    },
+                )
+
+            access_token = _make_access_token(str(user.id), user.email)
+            refresh_value = _make_refresh_token_value()
+            remember_me: bool = body.rememberMe if body.rememberMe is not None else False
+            expire_days = (
+                REFRESH_TOKEN_REMEMBER_DAYS if remember_me else REFRESH_TOKEN_EXPIRE_DAYS
+            )
+            refresh_token = RefreshToken(
+                user_id=user.id,
+                token_hash=_hash_token(refresh_value),
+                expires_at=_now() + timedelta(days=expire_days),
+                revoked_at=None,
+                remember_me=remember_me,
+            )
+            session.add(refresh_token)
+            await session.commit()
+
+            _set_refresh_cookie(response, refresh_value, remember_me)
+
+            return LoginResponse(
+                accessToken=access_token,
+                tokenType="Bearer",
+            )
+
+    async def forgotPassword(
+        self, body: ForgotPasswordRequest
+    ) -> ForgotPasswordResponse:
+        async with _async_session() as session:
+            result = await session.execute(
+                select(User).where(User.email == body.email.lower())
+            )
+            user: Optional[User] = result.scalar_one_or_none()
+
+            if user is not None and user.is_active:
+                raw_token = hashlib.sha256(os.urandom(64)).hexdigest()
+                token_hash = _hash_token(raw_token)
+                reset = PasswordReset(
+                    user_id=user.id,
+                    token_hash=token_hash,
+                    expires_at=_now() + timedelta(hours=1),
+                    used_at=None,
+                )
+                session.add(reset)
+                await session.commit()
+                # In a real system we would send an email here with raw_token.
+
+            return ForgotPasswordResponse(
+                message="If an account with that email exists, a password reset link has been sent."
+            )
+
+    async def resetPassword(
+        self, body: ResetPasswordRequest
+    ) -> ResetPasswordResponse:
+        async with _async_session() as session:
+            token_hash = _hash_token(body.token)
+            result = await session.execute(
+                select(PasswordReset).where(
+                    and_(
+                        PasswordReset.token_hash == token_hash,
+                        PasswordReset.used_at.is_(None),
+                        PasswordReset.expires_at > _now(),
+                    )
+                )
+            )
+            reset: Optional[PasswordReset] = result.scalar_one_or_none()
+
+            if reset is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": {
+                            "code": "INVALID_OR_EXPIRED_TOKEN",
+                            "message": "This password reset link is invalid or has expired.",
+                            "details": {},
+                        }
+                    },
+                )
+
+            user_result = await session.execute(
+                select(User).where(User.id == reset.user_id)
+            )
+            user: Optional[User] = user_result.scalar_one_or_none()
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": {
+                            "code": "INVALID_OR_EXPIRED_TOKEN",
+                            "message": "This password reset link is invalid or has expired.",
+                            "details": {},
+                        }
+                    },
+                )
+
+            new_hash = bcrypt.hashpw(
+                body.password.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+            ).decode()
+            user.password_hash = new_hash
+            user.updated_at = _now()
+            reset.used_at = _now()
+            session.add(user)
+            session.add(reset)
+            await session.commit()
+
+            return ResetPasswordResponse(
+                message="Your password has been reset successfully."
+            )
+
+    async def me(self, access_token: str) -> MeResponse:
+        payload = _decode_access_token(access_token)
+        user_id = payload.get("sub")
+
+        async with _async_session() as session:
+            result = await session.execute(
+                select(User).where(User.id == user_id)
+            )
+            user: Optional[User] = result.scalar_one_or_none()
+
+            if user is None or not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found or inactive.",
+                )
+
+            return MeResponse(
+                id=str(user.id),
+                fullName=user.full_name,
+                email=user.email,
+                createdAt=user.created_at.isoformat(),
+            )
+
+    async def logout(
+        self,
+        body: LogoutRequest,
+        access_token: Optional[str],
+        response: Response,
+    ) -> LogoutResponse:
+        async with _async_session() as session:
+            refresh_token_value: Optional[str] = body.refreshToken if body else None
+
+            if refresh_token_value:
+                token_hash = _hash_token(refresh_token_value)
+                result = await session.execute(
+                    select(RefreshToken).where(
+                        and_(
+                            RefreshToken.token_hash == token_hash,
+                            RefreshToken.revoked_at.is_(None),
+                        )
+                    )
+                )
+                refresh_token_record: Optional[RefreshToken] = result.scalar_one_or_none()
+                if refresh_token_record is not None:
+                    refresh_token_record.revoked_at = _now()
+                    session.add(refresh_token_record)
+                    await session.commit()
+
+        _clear_refresh_cookie(response)
+
+        return LogoutResponse(message="Logged out successfully.")
+
+    async def refresh(
+        self, body: RefreshRequest, response: Response
+    ) -> RefreshResponse:
+        refresh_token_value: Optional[str] = body.refreshToken if body else None
+
+        if not refresh_token_value:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "error": {
+                        "code": "MISSING_REFRESH_TOKEN",
+                        "message": "Refresh token is required.",
+                        "details": {},
+                    }
+                },
+            )
+
+        token_hash = _hash_token(refresh_token_value)
+
+        async with _async_session() as session:
+            result = await session.execute(
+                select(RefreshToken).where(
+                    and_(
+                        RefreshToken.token_hash == token_hash,
+                        RefreshToken.revoked_at.is_(None),
+                        RefreshToken.expires_at > _now(),
+                    )
+                )
+            )
+            record: Optional[RefreshToken] = result.scalar_one_or_none()
+
+            if record is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail={
+                        "error": {
+                            "code": "INVALID_REFRESH_TOKEN",
+                            "message": "Refresh token is invalid or has expired.",
+                            "details": {},
+                        }
+                    },
+                )
+
+            # Revoke old token (rotation)
+            record.revoked_at = _now()
+            session.add(record)
+
+            user_result = await session.execute(
+                select(User).where(User.id == record.user_id)
+            )
+            user: Optional[User] = user_result.scalar_one_or_none()
+
+            if user is None or not user.is_active:
+                await session.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found or inactive.",
+                )
+
+            new_access_token = _make_access_token(str(user.id), user.email)
+            new_refresh_value = _make_refresh_token_value()
+            remember_me: bool = record.remember_me or False
+            expire_days = (
+                REFRESH_TOKEN_REMEMBER_DAYS if remember_me else REFRESH_TOKEN_EXPIRE_DAYS
+            )
+            new_refresh_record = RefreshToken(
+                user_id=user.id,
+                token_hash=_hash_token(new_refresh_value),
+                expires_at=_now() + timedelta(days=expire_days),
+                revoked_at=None,
+                remember_me=remember_me,
+            )
+            session.add(new_refresh_record)
+            await session.commit()
+
+            _set_refresh_cookie(response, new_refresh_value, remember_me)
+
+            return RefreshResponse(
+                accessToken=new_access_token,
+                tokenType="Bearer",
+            )
