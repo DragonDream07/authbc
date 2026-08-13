@@ -1,111 +1,67 @@
-from typing import Any
+from typing import List, Optional
 
-from pydantic import BaseModel
-
-
-# ---------------------------------------------------------------------------
-# Register
-# ---------------------------------------------------------------------------
+from pydantic import BaseModel, EmailStr
 
 
 class RegisterRequest(BaseModel):
-    fullName: str
-    email: str
+    full_name: str
+    email: EmailStr
     password: str
-    confirmPassword: str
-    acceptTerms: bool
+    confirm_password: str
 
 
-class UserPayload(BaseModel):
+class MeResponse(BaseModel):
     id: str
     fullName: str
     email: str
-    isActive: bool
     createdAt: str
 
 
 class RegisterResponse(BaseModel):
     accessToken: str
-    refreshToken: str
-    user: UserPayload
-
-
-# ---------------------------------------------------------------------------
-# Login
-# ---------------------------------------------------------------------------
+    user: MeResponse
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
-    rememberMe: bool | None = None
+    remember_me: Optional[bool] = False
 
 
 class LoginResponse(BaseModel):
     accessToken: str
-    refreshToken: str
-    user: UserPayload
-
-
-# ---------------------------------------------------------------------------
-# Forgot Password
-# ---------------------------------------------------------------------------
+    user: MeResponse
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class ForgotPasswordResponse(BaseModel):
     message: str
 
 
-# ---------------------------------------------------------------------------
-# Reset Password
-# ---------------------------------------------------------------------------
-
-
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str
-    confirmPassword: str
+    confirm_password: str
 
 
 class ResetPasswordResponse(BaseModel):
     message: str
 
 
-# ---------------------------------------------------------------------------
-# Me
-# ---------------------------------------------------------------------------
-
-
-class MeResponse(BaseModel):
-    user: UserPayload
-
-
-# ---------------------------------------------------------------------------
-# Logout
-# ---------------------------------------------------------------------------
+class LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
 
 
 class LogoutResponse(BaseModel):
     message: str
 
 
-# ---------------------------------------------------------------------------
-# Refresh
-# ---------------------------------------------------------------------------
-
-
 class RefreshResponse(BaseModel):
     accessToken: str
-    refreshToken: str
-
-
-# ---------------------------------------------------------------------------
-# Shared error envelope (used by exception handlers)
-# ---------------------------------------------------------------------------
+    user: MeResponse
 
 
 class ErrorDetail(BaseModel):
@@ -116,7 +72,7 @@ class ErrorDetail(BaseModel):
 class ErrorBody(BaseModel):
     code: str
     message: str
-    details: list[ErrorDetail]
+    details: List[ErrorDetail]
 
 
 class ErrorResponse(BaseModel):
