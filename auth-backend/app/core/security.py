@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 import bcrypt
 from jose import JWTError, jwt
@@ -41,7 +40,7 @@ def hash_token(token: str) -> str:
 
 def create_access_token(
     subject: str | int,
-    extra_claims: dict[str, Any] | None = None,
+    extra_claims: dict[str, str] | None = None,
     expires_delta: timedelta | None = None,
 ) -> str:
     """Encode a signed JWT access token.
@@ -60,7 +59,7 @@ def create_access_token(
     )
     expire = now + delta
 
-    payload: dict[str, Any] = {
+    payload: dict[str, str] = {
         "sub": str(subject),
         "iat": now,
         "exp": expire,
@@ -75,7 +74,7 @@ def create_access_token(
     )
 
 
-def decode_access_token(token: str) -> dict[str, Any]:
+def decode_access_token(token: str) -> dict:
     """Decode and verify *token*.
 
     Raises:
@@ -90,11 +89,3 @@ def decode_access_token(token: str) -> dict[str, Any]:
         settings.SECRET_KEY,
         algorithms=[settings.ALGORITHM],
     )
-
-
-def decode_access_token_unverified(token: str) -> dict[str, Any]:
-    """Decode *token* **without** verifying the signature or expiry.
-
-    Use only for debugging / logging — never for authorisation decisions.
-    """
-    return jwt.get_unverified_claims(token)

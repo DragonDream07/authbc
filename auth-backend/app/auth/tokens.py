@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from jose import JWTError, jwt
 
@@ -57,7 +56,7 @@ def create_access_token(
     *,
     user_id: int,
     email: str,
-    ttl: Optional[timedelta] = None,
+    ttl: timedelta | None = None,
 ) -> str:
     """Create a signed JWT access token.
 
@@ -90,7 +89,7 @@ def decode_access_token(token: str) -> dict:
     )
 
 
-def get_user_id_from_token(token: str) -> Optional[int]:
+def get_user_id_from_token(token: str) -> int | None:
     """Return the integer user_id from a valid access token, or None."""
     try:
         payload = decode_access_token(token)

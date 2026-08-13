@@ -3,7 +3,8 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
 from app.db.database import get_db
@@ -12,9 +13,9 @@ from app.models.user import User
 _bearer_scheme = HTTPBearer(auto_error=True)
 
 
-def get_current_user(
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
     """Validate the Bearer access token and return the authenticated User.
 
@@ -45,7 +46,8 @@ def get_current_user(
     if subject is None:
         raise _unauthorized
 
-    user: User | None = db.query(User).filter(User.id == subject).first()
+    result = await db.execute(select(User).where(User.id == subject))
+    user: User | None = result.scalars().first()
     if user is None:
         raise _unauthorized
 

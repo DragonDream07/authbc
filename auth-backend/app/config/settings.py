@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import AnyUrl, EmailStr, Field, field_validator
+from pydantic import EmailStr, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

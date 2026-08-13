@@ -1,7 +1,6 @@
 import hashlib
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 import bcrypt
 import jwt
@@ -20,11 +19,17 @@ from app.auth.schemas import (
     ResetPasswordResponse,
 )
 
-SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", "changeme")
+SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", "")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY environment variable must be set.")
 ALGORITHM: str = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
+    os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
+)
 REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
-REFRESH_TOKEN_REMEMBER_DAYS: int = int(os.environ.get("REFRESH_TOKEN_REMEMBER_DAYS", "30"))
+REFRESH_TOKEN_REMEMBER_DAYS: int = int(
+    os.environ.get("REFRESH_TOKEN_REMEMBER_DAYS", "30")
+)
 BCRYPT_ROUNDS: int = int(os.environ.get("BCRYPT_ROUNDS", "12"))
 REFRESH_COOKIE_NAME: str = "refresh_token"
 
@@ -36,7 +41,9 @@ def _hash_token(raw: str) -> str:
 
 
 def _create_access_token(user_id: str, email: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    )
     payload = {
         "sub": str(user_id),
         "email": email,
@@ -51,9 +58,13 @@ def _create_refresh_token_value() -> str:
     return hashlib.sha256(os.urandom(64)).hexdigest()
 
 
-def _set_refresh_cookie(response: Response, token_value: str, remember_me: bool) -> None:
+def _set_refresh_cookie(
+    response: Response, token_value: str, remember_me: bool
+) -> None:
     max_age = (
-        REFRESH_TOKEN_REMEMBER_DAYS * 86400 if remember_me else REFRESH_TOKEN_EXPIRE_DAYS * 86400
+        REFRESH_TOKEN_REMEMBER_DAYS * 86400
+        if remember_me
+        else REFRESH_TOKEN_EXPIRE_DAYS * 86400
     )
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -121,11 +132,16 @@ class AuthService:
                     detail={
                         "error": {
                             "code": "EMAIL_TAKEN",
-                            "message": "An account with this email already exists.",
+                            "message": (
+                                "An account with this email already exists."
+                            ),
                             "details": [
                                 {
                                     "field": "email",
-                                    "message": "An account with this email already exists.",
+                                    "message": (
+                                        "An account with this email already"
+                                        " exists."
+                                    ),
                                 }
                             ],
                         }
@@ -163,7 +179,8 @@ class AuthService:
         conn = await _get_db()
         try:
             row = await conn.fetchrow(
-                "SELECT id, full_name, email, password_hash, is_active FROM users WHERE email = $1",
+                "SELECT id, full_name, email, password_hash, is_active"
+                " FROM users WHERE email = $1",
                 body.email.lower(),
             )
 
@@ -181,7 +198,9 @@ class AuthService:
             if not row:
                 raise invalid_exc
 
-            if not bcrypt.checkpw(body.password.encode(), row["password_hash"].encode()):
+            if not bcrypt.checkpw(
+                body.password.encode(), row["password_hash"].encode()
+            ):
                 raise invalid_exc
 
             if not row["is_active"]:
@@ -201,7 +220,11 @@ class AuthService:
             remember_me: bool = getattr(body, "remember_me", False) or False
 
             expires_at = datetime.now(timezone.utc) + timedelta(
-                days=REFRESH_TOKEN_REMEMBER_DAYS if remember_me else REFRESH_TOKEN_EXPIRE_DAYS
+                days=(
+                    REFRESH_TOKEN_REMEMBER_DAYS
+                    if remember_me
+                    else REFRESH_TOKEN_EXPIRE_DAYS
+                )
             )
 
             await conn.execute(
@@ -232,7 +255,9 @@ class AuthService:
     # ------------------------------------------------------------------
     # forgotPassword
     # ------------------------------------------------------------------
-    async def forgotPassword(self, body: ForgotPasswordRequest) -> ForgotPasswordResponse:
+    async def forgotPassword(
+        self, body: ForgotPasswordRequest
+    ) -> ForgotPasswordResponse:
         conn = await _get_db()
         try:
             row = await conn.fetchrow(
@@ -257,7 +282,10 @@ class AuthService:
                 # In production, send email with raw_token here.
 
             return ForgotPasswordResponse(
-                message="If an account with that email exists, a password reset link has been sent."
+                message=(
+                    "If an account with that email exists, a password reset"
+                    " link has been sent."
+                )
             )
         finally:
             await conn.close()
@@ -265,7 +293,9 @@ class AuthService:
     # ------------------------------------------------------------------
     # resetPassword
     # ------------------------------------------------------------------
-    async def resetPassword(self, body: ResetPasswordRequest) -> ResetPasswordResponse:
+    async def resetPassword(
+        self, body: ResetPasswordRequest
+    ) -> ResetPasswordResponse:
         if body.password != body.confirm_password:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -304,7 +334,10 @@ class AuthService:
                 detail={
                     "error": {
                         "code": "INVALID_RESET_TOKEN",
-                        "message": "This password reset link is invalid or has expired.",
+                        "message": (
+                            "This password reset link is invalid or has"
+                            " expired."
+                        ),
                         "details": [],
                     }
                 },
@@ -328,7 +361,8 @@ class AuthService:
 
             async with conn.transaction():
                 await conn.execute(
-                    "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+                    "UPDATE users SET password_hash = $1,"
+                    " updated_at = NOW() WHERE id = $2",
                     password_hash,
                     row["user_id"],
                 )
@@ -337,11 +371,14 @@ class AuthService:
                     row["id"],
                 )
                 await conn.execute(
-                    "UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
+                    "UPDATE refresh_tokens SET revoked_at = NOW()"
+                    " WHERE user_id = $1 AND revoked_at IS NULL",
                     row["user_id"],
                 )
 
-            return ResetPasswordResponse(message="Your password has been reset successfully.")
+            return ResetPasswordResponse(
+                message="Your password has been reset successfully."
+            )
         finally:
             await conn.close()
 
@@ -381,16 +418,17 @@ class AuthService:
     # logout
     # ------------------------------------------------------------------
     async def logout(
-        self, token: Optional[str], request: Request, response: Response
+        self, token: str | None, request: Request, response: Response
     ) -> None:
-        refresh_token_value: Optional[str] = request.cookies.get(REFRESH_COOKIE_NAME)
+        refresh_token_value: str | None = request.cookies.get(REFRESH_COOKIE_NAME)
 
         if refresh_token_value:
             conn = await _get_db()
             try:
                 token_hash = _hash_token(refresh_token_value)
                 await conn.execute(
-                    "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
+                    "UPDATE refresh_tokens SET revoked_at = NOW()"
+                    " WHERE token_hash = $1 AND revoked_at IS NULL",
                     token_hash,
                 )
             finally:
@@ -402,7 +440,7 @@ class AuthService:
     # refresh  (FR-08)
     # ------------------------------------------------------------------
     async def refresh(self, request: Request, response: Response) -> RefreshResponse:
-        refresh_token_value: Optional[str] = request.cookies.get(REFRESH_COOKIE_NAME)
+        refresh_token_value: str | None = request.cookies.get(REFRESH_COOKIE_NAME)
 
         unauthorized_exc = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -454,7 +492,11 @@ class AuthService:
             new_token_hash = _hash_token(new_refresh_token_value)
             remember_me: bool = row["remember_me"] or False
             new_expires_at = now + timedelta(
-                days=REFRESH_TOKEN_REMEMBER_DAYS if remember_me else REFRESH_TOKEN_EXPIRE_DAYS
+                days=(
+                    REFRESH_TOKEN_REMEMBER_DAYS
+                    if remember_me
+                    else REFRESH_TOKEN_EXPIRE_DAYS
+                )
             )
 
             async with conn.transaction():
@@ -465,7 +507,8 @@ class AuthService:
                 )
                 await conn.execute(
                     """
-                    INSERT INTO refresh_tokens (user_id, token_hash, expires_at, remember_me)
+                    INSERT INTO refresh_tokens
+                        (user_id, token_hash, expires_at, remember_me)
                     VALUES ($1, $2, $3, $4)
                     """,
                     row["user_id"],
@@ -529,7 +572,10 @@ class AuthService:
         errors = []
         if len(password) < 8:
             errors.append(
-                {"field": "password", "message": "Password must be at least 8 characters."}
+                {
+                    "field": "password",
+                    "message": "Password must be at least 8 characters.",
+                }
             )
         if not any(c.isupper() for c in password):
             errors.append(

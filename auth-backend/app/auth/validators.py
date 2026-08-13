@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -12,6 +11,12 @@ PASSWORD_MIN_LENGTH = 8
 _UPPER_RE = re.compile(r"[A-Z]")
 _LOWER_RE = re.compile(r"[a-z]")
 _DIGIT_RE = re.compile(r"[0-9]")
+
+# Email validation regex — compiled once at module load
+_EMAIL_RE = re.compile(
+    r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +56,7 @@ MSG_TOKEN_EXPIRED = "This reset link has expired. Please request a new one."
 # ---------------------------------------------------------------------------
 
 
-def validate_full_name(value: Optional[str]) -> str:
+def validate_full_name(value: str | None) -> str:
     """Validate the full_name field.
 
     Rules (applied in order):
@@ -66,7 +71,7 @@ def validate_full_name(value: Optional[str]) -> str:
     return value
 
 
-def validate_email(value: Optional[str]) -> str:
+def validate_email(value: str | None) -> str:
     """Validate the email field.
 
     Rules (applied in order):
@@ -79,17 +84,12 @@ def validate_email(value: Optional[str]) -> str:
     value = value.strip()
     if len(value) > 254:
         raise ValueError(MSG_EMAIL_MAX_LENGTH)
-    # Basic structural check: one @, non-empty local and domain parts
-    _email_re = re.compile(
-        r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
-        re.IGNORECASE,
-    )
-    if not _email_re.match(value):
+    if not _EMAIL_RE.match(value):
         raise ValueError(MSG_EMAIL_INVALID)
     return value.lower()
 
 
-def validate_password(value: Optional[str]) -> str:
+def validate_password(value: str | None) -> str:
     """Validate the password field against the active password policy.
 
     Rules (applied in order):
@@ -115,7 +115,7 @@ def validate_password(value: Optional[str]) -> str:
     return value
 
 
-def validate_confirm_password(password: str, confirm_password: Optional[str]) -> str:
+def validate_confirm_password(password: str, confirm_password: str | None) -> str:
     """Validate that confirm_password matches password.
 
     Rules (applied in order):
@@ -129,7 +129,7 @@ def validate_confirm_password(password: str, confirm_password: Optional[str]) ->
     return confirm_password
 
 
-def validate_terms_accepted(value: Optional[bool]) -> bool:
+def validate_terms_accepted(value: bool | None) -> bool:
     """Validate that the user has accepted the terms and conditions.
 
     Rules (applied in order):

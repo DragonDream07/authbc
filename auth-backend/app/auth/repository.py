@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -15,7 +14,7 @@ from app.models.password_reset import PasswordReset
 
 async def get_user_by_id(
     conn: AsyncConnection, user_id: int
-) -> Optional[dict]:
+) -> dict | None:
     result = await conn.execute(
         text("SELECT * FROM users WHERE id = :id"),
         {"id": user_id},
@@ -26,7 +25,7 @@ async def get_user_by_id(
 
 async def get_user_by_email(
     conn: AsyncConnection, email: str
-) -> Optional[dict]:
+) -> dict | None:
     result = await conn.execute(
         text("SELECT * FROM users WHERE email = :email"),
         {"email": email},
@@ -121,7 +120,7 @@ async def create_password_reset(
 
 async def get_password_reset_by_token_hash(
     conn: AsyncConnection, token_hash: str
-) -> Optional[dict]:
+) -> dict | None:
     result = await conn.execute(
         text(
             """
@@ -200,7 +199,7 @@ async def create_refresh_token(
 
 async def get_refresh_token_by_token_hash(
     conn: AsyncConnection, token_hash: str
-) -> Optional[dict]:
+) -> dict | None:
     result = await conn.execute(
         text(
             """
@@ -232,7 +231,8 @@ async def revoke_refresh_token(
 async def revoke_all_refresh_tokens_for_user(
     conn: AsyncConnection, user_id: int
 ) -> None:
-    """Revoke every active refresh token for a user (e.g. on logout-all or password change)."""
+    """Revoke every active refresh token for a user (e.g. on logout-all
+    or password change)."""
     await conn.execute(
         text(
             """

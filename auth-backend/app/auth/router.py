@@ -23,7 +23,11 @@ def get_auth_service() -> AuthService:
     return AuthService()
 
 
-@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=RegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def register(
     body: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
@@ -40,16 +44,24 @@ async def login(
     return await service.login(body, response)
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordResponse, status_code=status.HTTP_202_ACCEPTED)
-async def forgotPassword(
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def forgot_password(
     body: ForgotPasswordRequest,
     service: AuthService = Depends(get_auth_service),
 ) -> ForgotPasswordResponse:
     return await service.forgotPassword(body)
 
 
-@router.post("/reset-password", response_model=ResetPasswordResponse, status_code=status.HTTP_200_OK)
-async def resetPassword(
+@router.post(
+    "/reset-password",
+    response_model=ResetPasswordResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def reset_password(
     body: ResetPasswordRequest,
     service: AuthService = Depends(get_auth_service),
 ) -> ResetPasswordResponse:
@@ -64,7 +76,13 @@ async def me(
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "UNAUTHORIZED", "message": "Authentication required.", "details": []}},
+            detail={
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Authentication required.",
+                    "details": [],
+                }
+            },
         )
     return await service.me(credentials.credentials)
 
@@ -80,7 +98,11 @@ async def logout(
     await service.logout(token, request, response)
 
 
-@router.post("/refresh", response_model=RefreshResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/refresh",
+    response_model=RefreshResponse,
+    status_code=status.HTTP_200_OK,
+)
 async def refresh(
     request: Request,
     response: Response,

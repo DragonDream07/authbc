@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 import uuid
 
 
@@ -11,4 +10,4 @@ class PasswordReset:
     token_hash: str
     expires_at: datetime
     created_at: datetime
-    used_at: Optional[datetime] = None
+    used_at: datetime | None = None

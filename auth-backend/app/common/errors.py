@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class ErrorCode(str, Enum):
@@ -18,7 +18,7 @@ class AppException(Exception):
         code: ErrorCode,
         message: str,
         status_code: int = 400,
-        details: Optional[Dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         self.code = code
         self.message = message
@@ -31,7 +31,7 @@ class ValidationError(AppException):
     def __init__(
         self,
         message: str,
-        details: Optional[Dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             code=ErrorCode.VALIDATION_ERROR,
@@ -51,7 +51,10 @@ class InvalidCredentialsError(AppException):
 
 
 class EmailTakenError(AppException):
-    def __init__(self, message: str = "An account with this email already exists.") -> None:
+    def __init__(
+        self,
+        message: str = "An account with this email already exists.",
+    ) -> None:
         super().__init__(
             code=ErrorCode.EMAIL_TAKEN,
             message=message,
@@ -69,7 +72,10 @@ class InvalidTokenError(AppException):
 
 
 class UnauthorizedError(AppException):
-    def __init__(self, message: str = "Authentication is required to access this resource.") -> None:
+    def __init__(
+        self,
+        message: str = "Authentication is required to access this resource.",
+    ) -> None:
         super().__init__(
             code=ErrorCode.UNAUTHORIZED,
             message=message,
@@ -78,7 +84,10 @@ class UnauthorizedError(AppException):
 
 
 class RateLimitedError(AppException):
-    def __init__(self, message: str = "Too many requests. Please try again later.") -> None:
+    def __init__(
+        self,
+        message: str = "Too many requests. Please try again later.",
+    ) -> None:
         super().__init__(
             code=ErrorCode.RATE_LIMITED,
             message=message,
@@ -87,7 +96,10 @@ class RateLimitedError(AppException):
 
 
 class InternalError(AppException):
-    def __init__(self, message: str = "An unexpected error occurred. Please try again later.") -> None:
+    def __init__(
+        self,
+        message: str = "An unexpected error occurred. Please try again later.",
+    ) -> None:
         super().__init__(
             code=ErrorCode.INTERNAL_ERROR,
             message=message,
