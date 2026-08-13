@@ -1,37 +1,52 @@
-from pydantic import BaseModel, EmailStr
+from __future__ import annotations
+
+from datetime import datetime
 from typing import Optional
 
+from pydantic import BaseModel, EmailStr, Field
+
+
+# ---------------------------------------------------------------------------
+# Register
+# ---------------------------------------------------------------------------
+
+class RegisterRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    confirm_password: str = Field(..., min_length=8)
+
+
+class RegisterResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    rememberMe: Optional[bool] = None
-
-
-class MeResponse(BaseModel):
-    id: str
-    email: str
-    fullName: str
+    remember_me: Optional[bool] = False
 
 
 class LoginResponse(BaseModel):
-    accessToken: str
-    tokenType: str
-    user: MeResponse
-
-
-class RegisterRequest(BaseModel):
-    fullName: str
-    email: EmailStr
-    password: str
-    confirmPassword: str
-
-
-class RegisterResponse(BaseModel):
-    id: str
+    access_token: str
+    token_type: str
+    id: int
+    full_name: str
     email: str
-    fullName: str
 
+
+# ---------------------------------------------------------------------------
+# Forgot Password
+# ---------------------------------------------------------------------------
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -41,37 +56,66 @@ class ForgotPasswordResponse(BaseModel):
     message: str
 
 
+# ---------------------------------------------------------------------------
+# Reset Password
+# ---------------------------------------------------------------------------
+
 class ResetPasswordRequest(BaseModel):
     token: str
-    password: str
-    confirmPassword: str
+    password: str = Field(..., min_length=8)
+    confirm_password: str = Field(..., min_length=8)
 
 
 class ResetPasswordResponse(BaseModel):
     message: str
 
 
+# ---------------------------------------------------------------------------
+# Me
+# ---------------------------------------------------------------------------
+
+class MeResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Logout
+# ---------------------------------------------------------------------------
+
 class LogoutRequest(BaseModel):
-    refreshToken: Optional[str] = None
+    refresh_token: Optional[str] = None
 
 
 class LogoutResponse(BaseModel):
     message: str
 
 
+# ---------------------------------------------------------------------------
+# Refresh
+# ---------------------------------------------------------------------------
+
 class RefreshRequest(BaseModel):
-    refreshToken: str
+    refresh_token: str
 
 
 class RefreshResponse(BaseModel):
-    accessToken: str
-    tokenType: str
+    access_token: str
+    token_type: str
 
+
+# ---------------------------------------------------------------------------
+# Error
+# ---------------------------------------------------------------------------
 
 class ErrorDetail(BaseModel):
     code: str
     message: str
-    details: list[str] = []
+    details: Optional[dict] = None
 
 
 class ErrorResponse(BaseModel):
